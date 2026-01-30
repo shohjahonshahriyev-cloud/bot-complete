@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.enums import ParseMode
 
 # =================================================================
@@ -28,6 +28,7 @@ LOGS_DIR = "logs"
 # Fayl nomlari
 USERS_DB = "data/users.json"
 STATS_FILE = "data/stats.json"
+CHANNELS_DB = "data/channels.json"
 
 # Bot sozlamalari
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
@@ -65,6 +66,10 @@ class ExcelHandler:
             os.makedirs(EXCEL_FILES_DIR)
             return
         
+        # Keshni tozalash
+        self.excel_files.clear()
+        self.cached_data.clear()
+        
         for file in os.listdir(EXCEL_FILES_DIR):
             if file.endswith('.xlsx'):
                 self.excel_files.append(file)
@@ -78,11 +83,38 @@ class ExcelHandler:
             # Excel faylini o'qish, sana ustunlarini to'g'ri formatlash
             df = pd.read_excel(file_path)
             
-            # ID ustunini string formatiga o'tkazish
-            if 'Talaba ID' in df.columns:
-                df['Talaba ID'] = df['Talaba ID'].astype(str).str.zfill(6)
-            elif 'ID' in df.columns:
-                df['ID'] = df['ID'].astype(str).str.zfill(6)
+            # ID ustunini avtomatik topish va string formatiga o'tkazish
+            id_columns = ['Talaba ID', 'ID', 'Student ID', 'StudentID', 'Student_ID', 'id', 'student_id', 'studentid']
+            found_id_column = None
+            
+            # Avval standart nomlarni qidiramiz
+            for col in id_columns:
+                if col in df.columns:
+                    found_id_column = col
+                    df[col] = df[col].astype(str).str.zfill(6)
+                    print(f"DEBUG: {col} ustuni 6 xonali formatga o'tkazildi")
+                    break
+            
+            # Agar standart nomlar topilmasa, ID ni taxmin qilish
+            if not found_id_column:
+                print("DEBUG: Standart ID ustunlari topilmadi, ID ni taxmin qilish...")
+                for col in df.columns:
+                    col_lower = col.lower().strip()
+                    # ID ga o'xshash ustunlarni qidirish
+                    if any(keyword in col_lower for keyword in ['id', 'raqam', 'nomer', 'number', 'student', 'talaba']):
+                        # Birinchi 3 ta qiymatni tekshirish - ular raqamlarmi
+                        sample_values = df[col].head(3).dropna()
+                        if len(sample_values) > 0:
+                            # Barcha namunalar raqamlarmi (6 xonali)
+                            all_numeric = all(str(val).replace('.', '').isdigit() and len(str(val).replace('.', '')) <= 6 for val in sample_values)
+                            if all_numeric:
+                                found_id_column = col
+                                df[col] = df[col].astype(str).str.zfill(6)
+                                print(f"DEBUG: Taxminiy ID ustuni '{col}' topildi va formatlandi")
+                                break
+            
+            if not found_id_column:
+                print(f"WARNING: {filename} faylida ID ustuni topilmadi! Qidiruv ishlamaydi.")
             
             # Sana ustunlarini formatlash
             date_columns = ['Nazorat sanasi', 'Sana', 'Date', 'Дата']
@@ -129,12 +161,34 @@ class ExcelHandler:
     def search_by_id(self, user_id: str) -> list:
         """Barcha Excel fayllaridan ID bo'yicha qidiruv - barcha mos keladigan ma'lumotlarni qaytarish"""
         user_id = str(user_id).zfill(6)  # 6 xonali qilish
+        print(f"DEBUG: Qidiruv uchun ID: {user_id}")
         all_results = []
         
+        print(f"DEBUG: Keshdagi fayllar: {list(self.cached_data.keys())}")
+        
         for filename, df in self.cached_data.items():
-            # Avval 'Talaba ID' ustunini qidiramiz
-            if 'Talaba ID' in df.columns:
-                results = df[df['Talaba ID'] == user_id]
+            print(f"DEBUG: {filename} fayli ustunlari: {list(df.columns)}")
+            print(f"DEBUG: {filename} fayli barcha ustunlar:")
+            for i, col in enumerate(df.columns):
+                sample_values = df[col].head(3).tolist()
+                print(f"  {i+1}. {col}: {sample_values}")
+            
+            # ID ustunini turli nomlar bilan qidiramiz
+            id_columns = ['Talaba ID', 'ID', 'Student ID', 'StudentID', 'Student_ID', 'id', 'student_id', 'studentid']
+            found_id_column = None
+            
+            for col in id_columns:
+                if col in df.columns:
+                    found_id_column = col
+                    break
+            
+            if found_id_column:
+                id_values = df[found_id_column].head().tolist()
+                print(f"  {found_id_column} namunalari: {id_values}")
+                
+                results = df[df[found_id_column] == user_id]
+                print(f"DEBUG: {filename} faylida {len(results)} ta topildi ({found_id_column} ustuni bo'yicha)")
+                
                 if not results.empty:
                     for _, row in results.iterrows():
                         # Debug: qatorning barcha ma'lumotlarini ko'rsatish
@@ -142,39 +196,14 @@ class ExcelHandler:
                         for col in df.columns:
                             print(f"  {col}: {row[col]} (tip: {type(row[col])})")
                         
-                        result_data = {
-                            'ID': str(row.get('Talaba ID', '')),
-                            'Ism': str(row.get('Talaba F.I', '')),
-                            'Familiya': str(row.get('Talaba F.I.1', '')),
-                            'Fan': str(row.get('Fan nomi', '')),
-                            'Nazorat sanasi': str(row.get('Nazorat sanasi', '')),
-                            'Xona': str(row.get('Nazorat xonasi', '')),
-                            'Nazorat kuni': str(row.get('Nazorat kuni', '')),
-                            'Nazorat boshlanish vaqti': str(row.get('Nazorat boshlanish vaqti', '')),
-                            'Nazorat tugash vaqti': str(row.get('Nazorat tugash vaqti', '')),
-                            'Fan kodi': str(row.get('Fan kodi', '')),
-                            'Bino nomi': str(row.get('Bino nomi', '')),
-                            'source_file': filename
-                        }
-                        print(f"DEBUG: Qaytariladigan ma'lumotlar: {result_data}")
-                        all_results.append(result_data)
-            
-            # Keyin 'ID' ustunini qidiramiz
-            elif 'ID' in df.columns:
-                results = df[df['ID'] == user_id]
-                if not results.empty:
-                    for _, row in results.iterrows():
-                        result_data = {
-                            'ID': str(row.get('ID', '')),
-                            'Ism': str(row.get('Ism', '')),
-                            'Familiya': str(row.get('Familiya', '')),
-                            'Fan': str(row.get('Fan', '')),
-                            'Sana': str(row.get('Sana', '')),
-                            'Xona': str(row.get('Xona', '')),
-                            'source_file': filename
-                        }
+                        # Barcha ustunlardan ma'lumotlarni olish
+                        result_data = {}
+                        for col in df.columns:
+                            result_data[col] = str(row.get(col, ''))
+                        result_data['ID'] = str(row.get(found_id_column, ''))
                         all_results.append(result_data)
         
+        print(f"DEBUG: Jami topilgan natijalar: {len(all_results)}")
         return all_results if all_results else None
     
     def get_file_list(self) -> list:
@@ -194,6 +223,9 @@ class ExcelHandler:
             if os.path.exists(file_path):
                 os.remove(file_path)
             
+            # Qayta yuklash - keshni yangilash
+            self.load_existing_files()
+            
             return True
         except Exception as e:
             print(f"❌ Faylni o'chirishda xatolik: {e}")
@@ -210,6 +242,94 @@ class ExcelHandler:
             'total_records': total_records,
             'files': self.excel_files
         }
+
+# =================================================================
+# CHANNEL MANAGER KLASI
+# =================================================================
+
+class ChannelManager:
+    """Majburiy obuna kanallarini boshqarish uchun klass"""
+    
+    def __init__(self):
+        self.channels = []
+        self.load_channels()
+    
+    def load_channels(self):
+        """Kanallarni fayldan yuklash"""
+        try:
+            print(f"DEBUG: Kanallar fayli yo'li: {CHANNELS_DB}")
+            if os.path.exists(CHANNELS_DB):
+                with open(CHANNELS_DB, 'r', encoding='utf-8') as f:
+                    self.channels = json.load(f)
+                print(f"DEBUG: Yuklangan kanallar: {self.channels}")
+            else:
+                print(f"DEBUG: Kanallar fayli topilmadi: {CHANNELS_DB}")
+                self.channels = []
+        except Exception as e:
+            print(f"❌ Kanallarni yuklashda xatolik: {e}")
+            self.channels = []
+    
+    def save_channels(self):
+        """Kanallarni faylga saqlash"""
+        try:
+            os.makedirs(os.path.dirname(CHANNELS_DB), exist_ok=True)
+            with open(CHANNELS_DB, 'w', encoding='utf-8') as f:
+                json.dump(self.channels, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"❌ Kanallarni saqlashda xatolik: {e}")
+    
+    def add_channel(self, channel_id: str, channel_name: str = None):
+        """Yangi kanal qo'shish (faqat 1 ta kanal mumkin)"""
+        # Agar allaqachon kanal bo'lsa, yangisini qo'shmaslik
+        if len(self.channels) >= 1:
+            return False
+        
+        channel_info = {
+            'id': channel_id,
+            'name': channel_name or channel_id,
+            'added_date': datetime.now().isoformat()
+        }
+        
+        # Takrorlanishni tekshirish
+        for channel in self.channels:
+            if channel['id'] == channel_id:
+                return False
+        
+        self.channels.append(channel_info)
+        self.save_channels()
+        return True
+    
+    def remove_channel(self, channel_id: str):
+        """Kanalni o'chirish"""
+        self.channels = [ch for ch in self.channels if ch['id'] != channel_id]
+        self.save_channels()
+        return True
+    
+    def get_channels(self) -> list:
+        """Barcha kanallarni olish"""
+        return self.channels.copy()
+    
+    async def check_subscription(self, user_id: int, bot: Bot) -> bool:
+        """Foydalanuvchining barcha kanallarga obuna bo'lganini tekshirish"""
+        if not self.channels:
+            return True
+        
+        for channel in self.channels:
+            try:
+                # Kanal username ni to'g'ri formatga keltirish
+                channel_username = channel['username']
+                if not channel_username.startswith('@'):
+                    channel_username = f"@{channel_username}"  # @ belgisini qo'shish
+                
+                member = await bot.get_chat_member(channel_username, user_id)
+                if member.status not in ['member', 'administrator', 'creator']:
+                    return False
+            except Exception as e:
+                # Agar kanal topilmasa yoki bot kanalda admin bo'lmasa, bu kanalni o'tkazib yuborish
+                print(f"DEBUG: Kanal tekshiruvi xatoligi: {e}")
+                continue
+        
+        return True
 
 # =================================================================
 # DATABASE KLASI
@@ -335,6 +455,7 @@ dp = Dispatcher()
 # Global obyektlar
 excel_handler = ExcelHandler()
 db = Database()
+channel_manager = ChannelManager()
 
 # Admin xabar yuborish holati
 admin_broadcast_mode = set()  # Xabar yuborish rejimidagi adminlar ID lari
@@ -344,7 +465,8 @@ admin_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📊 Statistika")],
         [KeyboardButton(text="📁 Fayllar")],
-        [KeyboardButton(text="📢 Xabar yuborish")]
+        [KeyboardButton(text="📢 Xabar yuborish")],
+        [KeyboardButton(text="🔐 Majburiy obuna")]
     ],
     resize_keyboard=True
 )
@@ -374,50 +496,6 @@ class TelegramBot:
 # HANDLER FUNKSIYALARI
 # =================================================================
 
-@dp.message(Command("del"))
-async def delete_file_command(message: Message):
-    """Faylni o'chirish komandasi"""
-    if not TelegramBot.is_admin(message.from_user.id):
-        await message.answer(
-            "❌ Bu komanda faqat admin uchun!\n\n"
-            "👨‍💻 Admin @shohjahon_o5"
-        )
-        return
-    
-    # Komandadan fayl nomini ajratib olish
-    command_text = message.text
-    if not command_text.startswith('/del_'):
-        await message.answer(
-            "❌ Noto'g'ri komanda formati!\n\n"
-            "📋 To'g'ri format: /del_fayl_nomi.xlsx"
-        )
-        return
-    
-    filename = command_text[5:]  # '/del_' dan keyin qolgan qism
-    
-    if not filename:
-        await message.answer(
-            "❌ Fayl nomi ko'rsatilmadi!\n\n"
-            "📋 To'g'ri format: /del_fayl_nomi.xlsx"
-        )
-        return
-    
-    # Faylni o'chirish
-    if excel_handler.remove_file(filename):
-        # Statistikani yangilash
-        db.update_files_count(len(excel_handler.get_file_list()))
-        
-        await message.answer(
-            f"✅ Fayl muvaffaqiyatli o'chirildi: {filename}\n\n"
-            f"📊 Qolgan fayllar: {len(excel_handler.get_file_list())} ta\n"
-            f"🔄 Yangi fayl ro'yxatini ko'rish uchun '📁 Fayllar' tugmasini bosing."
-        )
-    else:
-        await message.answer(
-            f"❌ Faylni o'chirishda xatolik: {filename}\n\n"
-            "📋 Fayl nomini to'g'ri kiritingganimizga ishonch hosil qiling."
-        )
-
 @dp.message(Command("start"))
 async def start_command(message: Message):
     """Botni ishga tushurish komandasi"""
@@ -437,12 +515,44 @@ async def start_command(message: Message):
                 "📋 Admin imkoniyatlari:\n"
                 "• 📊 Statistika ko'rish\n"
                 "• 📁 Excel fayl yuklash\n"
-                "• 📢 Foydalanuvchilarga xabar yuborish\n\n"
+                "• 📢 Foydalanuvchilarga xabar yuborish\n"
+                "• 🔐 Majburiy obuna kanallarini boshqarish\n\n"
                 "📄 Excel faylni yuklash uchun faylni to'g'ridan-to'g'ri yuboring!\n\n"
                 "👨‍💻 Admin @shohjahon_o5",
                 reply_markup=admin_keyboard
             )
         else:
+            # Majburiy obuna tekshiruvi
+            is_subscribed = await channel_manager.check_subscription(user_id, message.bot)
+            
+            if not is_subscribed:
+                # Obuna bo'lmagan kanallar ro'yxati
+                channels = channel_manager.get_channels()
+                channel_text = ""
+                
+                # Username larsiz xabar
+                
+                # Obuna tugmasi
+                subscription_keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="📢 Kanalga o'tish", url=f"https://t.me/{channels[0]['username'].lstrip('@')}")],
+                        [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                    ]
+                ) if channels else InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                    ]
+                )
+                
+                await message.answer(
+                    f"🔐 **Majburiy obuna talab qilinadi!**\n\n"
+                    f"📢 Botdan foydalanish uchun kanalga obuna bo'lishingiz kerak:\n\n"
+                    f"📋 Obuna bo'lgach, '✅ Tasdiqlash' tugmasini bosing!",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=subscription_keyboard
+                )
+                return
+            
             await message.answer(
                 "🤖 SAMDAQU qidiruv botiga xush kelibsiz!\n\n"
                 "Men Excel fayllaridan ID orqali ma'lumotlarni topishim mumkin.\n\n"
@@ -461,6 +571,77 @@ async def start_command(message: Message):
             "🔄 Qaytadan urinib ko'ring.\n\n"
             "👨‍💻 Admin @shohjahon_o5",
             parse_mode=ParseMode.MARKDOWN
+        )
+
+@dp.callback_query(F.data == "start_search")
+async def start_search_callback(callback: CallbackQuery):
+    """ID raqamni yuborish uchun callback"""
+    try:
+        # Obunani tekshirish (faqat admin bo'lmaganlar uchun)
+        if not TelegramBot.is_admin(callback.from_user.id):
+            is_subscribed = await channel_manager.check_subscription(callback.from_user.id, callback.bot)
+            
+            if not is_subscribed:
+                await callback.answer(
+                    "❌ Avval kanalga obuna bo'ling!",
+                    show_alert=True
+                )
+                return
+        
+        await callback.message.answer(
+            "🔍 **ID raqamini yuboring:**\n\n"
+            "Iltimos, 6 xonali ID raqamingizni yuboring.\n"
+            "Masalan: `123456`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Start search callback da xatolik: {e}")
+        await callback.answer("❌ Xatolik yuz berdi!", show_alert=True)
+
+@dp.callback_query(F.data == "check_subscription")
+async def check_subscription_callback(callback: CallbackQuery):
+    """Majburiy obuna tasdiqlash callback"""
+    try:
+        user_id = callback.from_user.id
+        print(f"DEBUG: Obuna tekshiruv boshlandi, user_id: {user_id}")
+        
+        # Obunani tekshirish
+        is_subscribed = await channel_manager.check_subscription(user_id, callback.bot)
+        print(f"DEBUG: Obuna tekshiruv natijasi: {is_subscribed}")
+        
+        if is_subscribed:
+            # Foydalanuvchiga darhol foydalanish imkoniyati berish
+            welcome_keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🔍 ID raqamni yuborish", callback_data="start_search")]
+                ]
+            )
+            
+            await callback.message.edit_text(
+                "✅ Obuna tasdiqlandi!\n\n"
+                "Endi botdan to'liq foydalanishingiz mumkin.\n\n"
+                "🔍 6 xonali ID raqamingizni yuboring va nazorat ma'lumotlarini toping!\n\n"
+                "👨‍💻 Admin @shohjahon_o5",
+                reply_markup=welcome_keyboard
+            )
+            
+            await callback.answer("✅ Obuna tasdiqlandi!", show_alert=True)
+        else:
+            await callback.answer(
+                "❌ Siz hali kanal(lar)ga obuna bo'lmagansiz!\n"
+                "Iltimos, avval obuna bo'ling.",
+                show_alert=True
+            )
+            
+    except Exception as e:
+        logger.error(f"Obuna tekshirishda xatolik: {e}")
+        print(f"DEBUG: Obuna tekshirish xatoligi: {e}")
+        await callback.answer(
+            "❌ Xatolik yuz berdi!\n"
+            "Qaytadan urinib ko'ring.",
+            show_alert=True
         )
 
 @dp.message(Command("help"))
@@ -581,6 +762,83 @@ async def handle_document(message: Message):
             "🔄 Qaytadan urinib ko'ring."
         )
 
+@dp.message(Command("del"))
+async def delete_file_command(message: Message):
+    """Faylni o'chirish komandasi"""
+    print(f"DEBUG: delete_file_command chaqirildi, xabar: {message.text}")
+    
+    if not TelegramBot.is_admin(message.from_user.id):
+        print("DEBUG: Foydalanuvchi admin emas")
+        await message.answer(
+            "❌ Bu komanda faqat admin uchun!\n\n"
+            "👨‍💻 Admin @shohjahon_o5"
+        )
+        return
+    
+    # Komandadan fayl nomini ajratib olish
+    command_text = message.text
+    print(f"DEBUG: Command text: {command_text}")
+    
+    # Agar oddiy /del bo'lsa, fayllar ro'yxatini ko'rsatish
+    if command_text == "/del" or command_text.startswith("/del "):
+        print("DEBUG: Oddiy /del komandasi")
+        files = excel_handler.get_file_list()
+        print(f"DEBUG: Fayllar ro'yxati: {files}")
+        
+        if not files:
+            await message.answer(
+                "📁 **O'chirish uchun fayllar yo'q!**\n\n"
+                "📋 Excel fayllar hali yuklanmagan.\n\n"
+                "🔄 Fayl yuklash uchun faylni to'g'ridan-to'g'ri yuboring.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        files_text = "📁 **O'chirish uchun fayllar:**\n\n"
+        for i, file in enumerate(files, 1):
+            files_text += f"{i}. `{file}`\n"
+        
+        files_text += "\n📋 **O'chirish uchun:**\n"
+        files_text += "```\n/del_fayl_nomi.xlsx\n```\n\n"
+        files_text += "📌 Masalan: `/del_nazorat.xlsx`"
+        
+        await message.answer(files_text, parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    # /del_ bilan boshlanadigan komandalarni qabul qilish
+    if not command_text.startswith('/del_'):
+        await message.answer(
+            "❌ Noto'g'ri komanda formati!\n\n"
+            "📋 To'g'ri format: /del_fayl_nomi.xlsx\n\n"
+            "📁 Barcha fayllarni ko'rish uchun: /del"
+        )
+        return
+    
+    filename = command_text[5:]  # '/del_' dan keyin qolgan qism
+    
+    if not filename:
+        await message.answer(
+            "❌ Fayl nomi ko'rsatilmadi!\n\n"
+            "📋 To'g'ri format: /del_fayl_nomi.xlsx"
+        )
+        return
+    
+    # Faylni o'chirish
+    if excel_handler.remove_file(filename):
+        # Statistikani yangilash
+        db.update_files_count(len(excel_handler.get_file_list()))
+        
+        await message.answer(
+            f"✅ Fayl muvaffaqiyatli o'chirildi: {filename}\n\n"
+            f"📊 Qolgan fayllar: {len(excel_handler.get_file_list())} ta\n"
+            f"🔄 Yangi fayl ro'yxatini ko'rish uchun '📁 Fayllar' tugmasini bosing."
+        )
+    else:
+        await message.answer(
+            f"❌ Faylni o'chirishda xatolik: {filename}\n\n"
+            "📋 Fayl nomini to'g'ri kiritingganimizga ishonch hosil qiling."
+        )
+
 @dp.message(F.text & ~F.command)
 async def handle_message(message: Message):
     """Xabarlarni qabul qilish (ID qidirish va admin tugmalari)"""
@@ -590,6 +848,26 @@ async def handle_message(message: Message):
         
         # Foydalanuvchi faoliyatini yangilash
         db.update_user_activity(user_id)
+        
+        # Komandalarni tekshirish (agar ular Command handlerlar tomonidan qabul qilinmagan bo'lsa)
+        if message_text.startswith('/'):
+            print(f"DEBUG: Komanda keldi: {message_text}")
+            # /del komandasi uchun tekshirish
+            if message_text == "/del" or message_text.startswith("/del "):
+                print("DEBUG: /del komandasi chaqirilmoqda")
+                await delete_file_command(message)
+                return
+            elif message_text.startswith('/del_'):
+                print(f"DEBUG: /del_ komandasi chaqirilmoqda: {message_text}")
+                await delete_file_command(message)
+                return
+            # Boshqa komandalarni ham tekshirish mumkin
+            elif message_text == "/start":
+                await start_command(message)
+                return
+            elif message_text == "/help":
+                await help_command(message)
+                return
         
         # Admin tugmalari
         if TelegramBot.is_admin(user_id):
@@ -606,19 +884,60 @@ async def handle_message(message: Message):
                     "Yubormoqchi bo'lgan xabaringizni yozing.\n"
                     "Xabar barcha foydalanuvchilarga yuboriladi.\n\n"
                     "📝 **Shaxsiylashtirish uchun o'zgaruvchilar:**\n"
-                    "• `{first_name}` - Foydalanuvchi ismi\n"
-                    "• `{username}` - Telegram username\n"
-                    "• `{user_id}` - Foydalanuvchi ID si\n\n"
-                    "**Masalan:**\n"
-                    "Salom, {first_name} 👋\n"
-                    "Imtihon jadvali yangilandi.\n"
-                    "Bot orqali tekshirib olishingiz mumkin ✅\n\n"
+                    "• {first_name} - Foydalanuvchi ismi\n"
+                    "• {username} - Foydalanuvchi username\n"
+                    "• {user_id} - Foydalanuvchi ID\n\n"
                     "❌ Bekor qilish uchun 'bekor' deb yozing."
                 )
+                return
+            elif message_text == "🔐 Majburiy obuna":
+                try:
+                    await manage_subscription_channels(message)
+                except Exception as e:
+                    logger.error(f"Majburiy obuna tugmasida xatolik: {e}")
+                    await message.answer(
+                        "❌ Majburiy obuna menuni ochishda xatolik yuz berdi!\n"
+                        "🔄 Qaytadan urinib ko'ring.\n\n"
+                        "👨‍💻 Admin @shohjahon_o5"
+                    )
                 return
         
         # Oddiy foydalanuvchi tugmalari
         if message_text == "🔍 ID bilan qidirish":
+            # Obunani tekshirish (faqat admin bo'lmaganlar uchun)
+            if not TelegramBot.is_admin(user_id):
+                is_subscribed = await channel_manager.check_subscription(user_id, message.bot)
+                
+                if not is_subscribed:
+                    # Kanal ma'lumotlarini olish
+                    channels = channel_manager.get_channels()
+                    channel = channels[0] if channels else None
+                    
+                    # Obuna tugmasi
+                    if channel:
+                        subscription_keyboard = InlineKeyboardMarkup(
+                            inline_keyboard=[
+                                [InlineKeyboardButton(text="📢 Kanalga o'tish", url=f"https://t.me/{channel['username'].lstrip('@')}")],
+                                [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                            ]
+                        )
+                    else:
+                        subscription_keyboard = InlineKeyboardMarkup(
+                            inline_keyboard=[
+                                [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                            ]
+                        )
+                    
+                    await message.answer(
+                        "🔐 **Majburiy obuna talab qilinadi!**\n\n"
+                        "📢 Botdan to'liq foydalanish uchun kanalga obuna bo'lishingiz kerak:\n\n"
+                        "👉 **Obuna bo'lgach, pastdagi '✅ Tasdiqlash' tugmasini bosing!**\n\n"
+                        "⚠️ Obuna bo'lmasangiz, bot ishlamaydi!",
+                        reply_markup=subscription_keyboard,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    return
+            
             await message.answer(
                 "🔍 ID qidirish\n\n"
                 "Iltimos, 6 xonali ID raqamingizni yuboring:\n"
@@ -626,6 +945,40 @@ async def handle_message(message: Message):
             )
             return
         elif message_text == "ℹ️ Yordam":
+            # Obunani tekshirish (faqat admin bo'lmaganlar uchun)
+            if not TelegramBot.is_admin(user_id):
+                is_subscribed = await channel_manager.check_subscription(user_id, message.bot)
+                
+                if not is_subscribed:
+                    # Kanal ma'lumotlarini olish
+                    channels = channel_manager.get_channels()
+                    channel = channels[0] if channels else None
+                    
+                    # Obuna tugmasi
+                    if channel:
+                        subscription_keyboard = InlineKeyboardMarkup(
+                            inline_keyboard=[
+                                [InlineKeyboardButton(text="📢 Kanalga o'tish", url=f"https://t.me/{channel['username'].lstrip('@')}")],
+                                [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                            ]
+                        )
+                    else:
+                        subscription_keyboard = InlineKeyboardMarkup(
+                            inline_keyboard=[
+                                [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                            ]
+                        )
+                    
+                    await message.answer(
+                        "🔐 **Majburiy obuna talab qilinadi!**\n\n"
+                        "📢 Botdan to'liq foydalanish uchun kanalga obuna bo'lishingiz kerak:\n\n"
+                        "👉 **Obuna bo'lgach, pastdagi '✅ Tasdiqlash' tugmasini bosing!**\n\n"
+                        "⚠️ Obuna bo'lmasangiz, bot ishlamaydi!",
+                        reply_markup=subscription_keyboard,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    return
+            
             try:
                 await help_command(message)
             except Exception as e:
@@ -651,6 +1004,26 @@ async def handle_message(message: Message):
             # Qidiruvni amalga oshirish
             await search_by_id(message, message_text)
         else:
+            # Majburiy obuna boshqaruvi (admin uchun) - faqat kanal formatlarini tekshirish
+            if TelegramBot.is_admin(user_id):
+                current_channels = channel_manager.get_channels()
+                
+                # Faqat kanal qo'shish/o'chirish xabarlarini qabul qilish
+                message_text = message.text.strip()
+                
+                # Kanal qo'shish formatlari
+                is_channel_format = (
+                    message_text.startswith('@') or 
+                    message_text.startswith('https://t.me/') or 
+                    message_text.startswith('t.me/') or
+                    message_text.lower() in ['bekor', 'ochirish']
+                )
+                
+                # Agar kanal formatida bo'lsa va kanallar mavjud bo'lsa/yo'q bo'lsa
+                if is_channel_format and (not current_channels or len(current_channels) > 0):
+                    await handle_subscription_management(message)
+                    return
+            
             # Broadcast xabar (admin uchun) - faqat maxsus xabarlar uchun
             if TelegramBot.is_admin(user_id):
                 # Agar admin xabar yuborish rejimida bo'lsa
@@ -688,6 +1061,40 @@ async def handle_message(message: Message):
 async def search_by_id(message: Message, user_id: str):
     """ID bo'yicha qidiruv"""
     try:
+        # Majburiy obuna tekshiruvi (faqat admin bo'lmaganlar uchun)
+        if not TelegramBot.is_admin(message.from_user.id):
+            is_subscribed = await channel_manager.check_subscription(message.from_user.id, message.bot)
+            
+            if not is_subscribed:
+                # Kanal ma'lumotlarini olish
+                channels = channel_manager.get_channels()
+                channel = channels[0] if channels else None
+                
+                # Obuna tugmasi
+                if channel:
+                    subscription_keyboard = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="📢 Kanalga o'tish", url=f"https://t.me/{channel['username'].lstrip('@')}")],
+                            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                        ]
+                    )
+                else:
+                    subscription_keyboard = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                        ]
+                    )
+                
+                await message.answer(
+                    "🔐 **Majburiy obuna talab qilinadi!**\n\n"
+                    "📢 Botdan to'liq foydalanish uchun kanalga obuna bo'lishingiz kerak:\n\n"
+                    "👉 **Obuna bo'lgach, pastdagi '✅ Tasdiqlash' tugmasini bosing!**\n\n"
+                    "⚠️ Obuna bo'lmasangiz, bot ishlamaydi!",
+                    reply_markup=subscription_keyboard,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+        
         # Excel fayllarida qidirish
         result = excel_handler.search_by_id(user_id)
         
@@ -716,18 +1123,29 @@ async def search_by_id(message: Message, user_id: str):
                     print(f"Sana formatlash xatoligi: {e}")
                     formatted_date = str(date_str) if date_str != 'Noma\'lum' else 'Noma\'lum'
                 
-                # Natijani formatlash
-                response_text = f"📅 {i}-NAZORAT:\n"
-                response_text += f"🗓 HAFTA KUNI: {week_day.upper()}\n"
-                response_text += f"🗓 NAZORAT SANASI: {formatted_date}\n"
-                response_text += f"🔢 ID: {single_result['ID']}\n\n"
-                response_text += f"👤 ISM: {single_result['Familiya']}\n"
-                response_text += f"👥 FAMILIYA: {single_result['Ism']}\n"
-                response_text += f"📚 FAN: {single_result['Fan']}\n"
-                response_text += f"🏫 XONA: {single_result['Xona']}\n"
-                response_text += f"🕓 BOSHLANISH VAQTI: {str(single_result.get('Nazorat boshlanish vaqti', 'Noma\'lum'))}\n"
-                response_text += f"🕔 TUGASH VAQTI: {str(single_result.get('Nazorat tugash vaqti', 'Noma\'lum'))}\n"
-                response_text += f"📄 MANBA: {single_result['source_file']}"
+                # Natijani formatlash - ba'zi ustunlarni o'tkazib yuborish
+                response_text = f"📅 {i}-NAZORAT:\n\n"
+                
+                # O'tkazib yuboriladigan ustunlar ro'yxati
+                excluded_columns = ['fan_kodi', 'group_code', 'curriculum_language', 'exam', 'source_file', 'sirtqi', 'date', 'vaqti']
+                
+                for column_name, value in single_result.items():
+                    if column_name.lower() not in excluded_columns and column_name != 'ID':
+                        # Bo'sh bo'lmagan qiymatlarni ko'rsatish
+                        if value and value.strip() and value != 'nan':
+                            # Raqamli qiymatlarni formatlash (40.0 -> 40)
+                            try:
+                                if '.' in value and value.replace('.', '').isdigit():
+                                    formatted_value = value.rstrip('.0')
+                                    if not formatted_value:
+                                        formatted_value = '0'
+                                    response_text += f"📋 {column_name.upper()}: {formatted_value}\n"
+                                else:
+                                    response_text += f"📋 {column_name.upper()}: {value}\n"
+                            except:
+                                response_text += f"📋 {column_name.upper()}: {value}\n"
+                
+                response_text += f"\n🔢 ID: {single_result.get('ID', 'Noma\'lum')}"
                 
                 await message.answer(response_text)
         else:
@@ -745,49 +1163,71 @@ async def search_by_id(message: Message, user_id: str):
 
 async def list_files(message: Message):
     """Admin fayllar ro'yxatini ko'rsatish"""
-    if not TelegramBot.is_admin(message.from_user.id):
-        await message.answer(
-                "❌ Bu komanda faqat admin uchun!\n\n"
-                "👨‍💻 Admin @shohjahon_o5")
-        return
-    
-    files = excel_handler.get_file_list()
-    
-    if not files:
-        await message.answer("📭 Excel fayllari yo'q.\n\n📄 Yangi fayl yuklash uchun faylni to'g'ridan-to'g'ri yuboring!")
-        return
-    
-    response_text = "📁 **Excel fayllari:**\n\n"
-    
-    for i, filename in enumerate(files, 1):
-        file_path = os.path.join(EXCEL_FILES_DIR, filename)
-        file_size = os.path.getsize(file_path)
-        file_size_mb = file_size / (1024 * 1024)
+    try:
+        if not TelegramBot.is_admin(message.from_user.id):
+            await message.answer(
+                    "❌ Bu komanda faqat admin uchun!\n\n"
+                    "👨‍💻 Admin @shohjahon_o5")
+            return
         
-        response_text += f"{i}. 📄 {filename}\n"
-        response_text += f"   📊 Hajmi: {file_size_mb:.2f} MB\n"
-        response_text += f"   🗑️ O'chirish uchun: /del_{filename}\n\n"
-    
-    response_text += "\n📄 **Yangi fayl qo'shish:**\n"
-    response_text += "Faylni to'g'ridan-to'g'ri yuboring!\n\n"
-    response_text += "⚠️ **Diqqat:** Fayl o'chirgandan so'ng, u bilan bog'liq barcha ma'lumotlar o'chib ketadi!"
-    
-    await message.answer(response_text, parse_mode=ParseMode.MARKDOWN)
+        files = excel_handler.get_file_list()
+        
+        if not files:
+            await message.answer("📭 Excel fayllari yo'q.\n\n📄 Yangi fayl yuklash uchun faylni to'g'ridan-to'g'ri yuboring!")
+            return
+        
+        response_text = "📁 **Excel fayllari:**\n\n"
+        
+        for i, filename in enumerate(files, 1):
+            try:
+                file_path = os.path.join(EXCEL_FILES_DIR, filename)
+                file_size = os.path.getsize(file_path)
+                file_size_mb = file_size / (1024 * 1024)
+                
+                # Fayl nomidagi _ belgisini escape qilish
+                safe_filename = filename.replace('_', '\\_')
+                del_command = f"/del_{filename}".replace('_', '\\_')
+                
+                response_text += f"{i}. 📄 `{safe_filename}`\n"
+                response_text += f"   📊 Hajmi: {file_size_mb:.2f} MB\n"
+                response_text += f"   🗑️ O'chirish uchun: `{del_command}`\n\n"
+            except Exception as file_error:
+                print(f"DEBUG: {filename} fayli ma'lumotlarini olishda xatolik: {file_error}")
+                safe_filename = filename.replace('_', '\\_')
+                del_command = f"/del_{filename}".replace('_', '\\_')
+                response_text += f"{i}. 📄 `{safe_filename}`\n"
+                response_text += f"   📊 Hajmi: Noma'lum\n"
+                response_text += f"   🗑️ O'chirish uchun: `{del_command}`\n\n"
+        
+        response_text += "\n� **Yangi fayl qo'shish:**\n"
+        response_text += "Faylni to'g'ridan-to'g'ri yuboring!\n\n"
+        response_text += "⚠️ **Diqqat:** Fayl o'chirgandan so'ng, u bilan bog'liq barcha ma'lumotlar o'chib ketadi!"
+        
+        await message.answer(response_text, parse_mode=ParseMode.MARKDOWN)
+        
+    except Exception as e:
+        logger.error(f"Fayllar ro'yxatini ko'rsatishda xatolik: {e}")
+        await message.answer(
+            "❌ Fayllar ro'yxatini ko'rsatishda xatolik yuz berdi!\n"
+            "🔄 Qaytadan urinib ko'ring.\n\n"
+            "👨‍💻 Admin @shohjahon_o5"
+        )
 
 async def show_stats(message: Message):
     """Statistikani ko'rsatish"""
-    if not TelegramBot.is_admin(message.from_user.id):
-        await message.answer(
-                "❌ Bu komanda faqat admin uchun!\n\n"
-                "👨‍💻 Admin @shohjahon_o5")
-        return
-    
-    # Statistikani olish
-    stats = db.get_stats()
-    excel_stats = excel_handler.get_stats()
-    daily_stats = db.get_daily_stats(7)
-    
-    stats_text = f"""
+    try:
+        if not TelegramBot.is_admin(message.from_user.id):
+            await message.answer(
+                    "❌ Bu komanda faqat admin uchun!\n\n"
+                    "👨‍💻 Admin @shohjahon_o5")
+            return
+        
+        # Statistikani olish
+        stats = db.get_stats()
+        excel_stats = excel_handler.get_stats()
+        daily_stats = db.get_daily_stats(7)
+        
+        stats_text = f"""
 📊 **Bot statistikasi:**
 
 👥 **Umumiy foydalanuvchilar:** {stats['total_users']} ta
@@ -797,11 +1237,19 @@ async def show_stats(message: Message):
 
 📈 **Oxirgi 7 kun:**
 """
-    
-    for date, count in daily_stats.items():
-        stats_text += f"• {date}: {count} ta qidiruv\n"
-    
-    await message.answer(stats_text, parse_mode=ParseMode.MARKDOWN)
+        
+        for date, count in daily_stats.items():
+            stats_text += f"• {date}: {count} ta qidiruv\n"
+        
+        await message.answer(stats_text, parse_mode=ParseMode.MARKDOWN)
+        
+    except Exception as e:
+        logger.error(f"Statistikani ko'rsatishda xatolik: {e}")
+        await message.answer(
+            "❌ Statistikani ko'rsatishda xatolik yuz berdi!\n"
+            "🔄 Qaytadan urinib ko'ring.\n\n"
+            "👨‍💻 Admin @shohjahon_o5"
+        )
 
 async def notify_users_new_file(file_name: str, admin_name: str):
     """Yangi fayl yuklanganda barcha foydalanuvchilarga bildirish yuborish"""
@@ -821,10 +1269,8 @@ async def notify_users_new_file(file_name: str, admin_name: str):
             notification_text = f"""
 📢 **YANGI NAZORAT JADVALI!**
 
-📄 Fayl nomi: {file_name}
 👨‍💻 Yukladi: {admin_name}
 
-🔍 Endi yangi nazorat jadvali bo'yicha qidirish mumkin!
 ID raqamingizni yuboring va nazorat sanangizni bilib oling.
 
 🤖 SAMDAQU qidiruv boti
@@ -878,6 +1324,154 @@ async def broadcast_message(message: Message, text: str):
         parse_mode=ParseMode.MARKDOWN
     )
 
+async def manage_subscription_channels(message: Message):
+    """Majburiy obuna kanallarini boshqarish"""
+    try:
+        current_channels = channel_manager.get_channels()
+        
+        if not current_channels:
+            # Kanal qo'shish rejimi
+            await message.answer(
+                "🔐 **Majburiy obuna kanali qo'shish:**\n\n"
+                "📋 Kanal qo'shish uchun quyidagi formatlarda yuboring:\n"
+                "```\n@channel_username\nhttps://t.me/channel_username\nt.me/channel_username\n```\n\n"
+                "❌ Bekor qilish uchun 'bekor' deb yozing.\n\n"
+                "📌 Eslatma: Faqat 1 ta majburiy kanal qo'shish mumkin!",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        # Kanalni o'chirish yoki ko'rish
+        channel_info = current_channels[0]
+        
+        # Kanal ma'lumotlarini escape qilish
+        safe_id = channel_info['id'].replace('_', '\\_')
+        safe_name = channel_info['name'].replace('_', '\\_')
+        
+        channel_text = f"📢 **Joriy majburiy kanal:**\n\n"
+        channel_text += f"🔗 Kanal: @{safe_id}\n"
+        channel_text += f"📝 Nomi: {safe_name}\n"
+        channel_text += f"📅 Qo'shilgan sana: {channel_info['added_date'][:10]}\n\n"
+        channel_text += "🗑️ **Kanalni o'chirish uchun:**\n"
+        channel_text += "`ochirish` deb yozing\n\n"
+        channel_text += "❌ **Bekor qilish uchun:**\n"
+        channel_text += "`bekor` deb yozing"
+        
+        await message.answer(channel_text, parse_mode=ParseMode.MARKDOWN)
+        
+    except Exception as e:
+        logger.error(f"Majburiy obuna menuni ochishda xatolik: {e}")
+        await message.answer(
+            "❌ Majburiy obuna menuni ochishda xatolik yuz berdi!\n"
+            "🔄 Qaytadan urinib ko'ring.\n\n"
+            "👨‍💻 Admin @shohjahon_o5"
+        )
+
+async def handle_subscription_management(message: Message):
+    """Majburiy obuna kanallarini boshqarish - xabarlar qayta ishlash"""
+    try:
+        message_text = message.text.strip()
+        
+        if message_text.lower() == 'bekor':
+            await message.answer(
+                "❌ Majburiy obuna boshqaruvi bekor qilindi.\n\n"
+                "🔙 Admin menyuga qaytish uchun '📁 Fayllar' tugmasini bosing.",
+                reply_markup=admin_keyboard
+            )
+            return
+        
+        current_channels = channel_manager.get_channels()
+        
+        if not current_channels:
+            # Yangi kanal qo'shish - faqat @username yoki https://t.me/ linklar
+            channel_input = message_text.strip()
+            
+            # Validatsiya - faqat @username yoki https://t.me/ formatlar
+            is_valid = False
+            channel_id = channel_input
+            
+            if channel_input.startswith('@'):
+                # @username format
+                if len(channel_input) > 1 and channel_input[1:].replace('_', '').replace('-', '').isalnum():
+                    is_valid = True
+                    channel_id = channel_input
+            elif channel_input.startswith('https://t.me/'):
+                # https://t.me/username format
+                username = channel_input.replace('https://t.me/', '').replace('/', '')
+                if username and username.replace('_', '').replace('-', '').isalnum():
+                    is_valid = True
+                    channel_id = '@' + username
+            elif channel_input.startswith('t.me/'):
+                # t.me/username format
+                username = channel_input.replace('t.me/', '').replace('/', '')
+                if username and username.replace('_', '').replace('-', '').isalnum():
+                    is_valid = True
+                    channel_id = '@' + username
+            
+            if not is_valid:
+                await message.answer(
+                    "❌ Noto'g'ri kanal formati!\n\n"
+                    "📋 **To'g'ri formatlar:**\n"
+                    "• `@channel_username`\n"
+                    "• `https://t.me/channel_username`\n"
+                    "• `t.me/channel_username`\n\n"
+                    "🔄 Qaytadan urinib ko'ring yoki 'bekor' deb yozing."
+                )
+                return
+            
+            # Kanalni qo'shish
+            if channel_manager.add_channel(channel_id, channel_id):
+                safe_channel_id = channel_id.replace('_', '\\_')
+                await message.answer(
+                    f"✅ Majburiy obuna kanali muvaffaqiyatli qo'shildi!\n\n"
+                    f"📢 Kanal: {safe_channel_id}\n\n"
+                    f"🔐 Endi foydalanuvchilar shu kanalga obuna bo'lishi shart.\n\n"
+                    f"🔙 Admin menyuga qaytish uchun '📁 Fayllar' tugmasini bosing.",
+                    reply_markup=admin_keyboard
+                )
+            else:
+                await message.answer(
+                    f"❌ Kanalni qo'shishda xatolik yuz berdi!\n\n"
+                    f"📋 Ehtimol sabablar:\n"
+                    f"• Kanal allaqachon qo'shilgan\n"
+                    f"• Bot kanalda admin emas\n\n"
+                    f"🔄 Qaytadan urinib ko'ring yoki 'bekor' deb yozing."
+                )
+        else:
+            # Kanalni o'chirish
+            if message_text.lower() == 'ochirish':
+                channel_info = current_channels[0]
+                if channel_manager.remove_channel(channel_info['id']):
+                    safe_id = channel_info['id'].replace('_', '\\_')
+                    await message.answer(
+                        f"✅ Majburiy obuna kanali o'chirildi!\n\n"
+                        f"📢 O'chirilgan kanal: @{safe_id}\n\n"
+                        f"🔐 Endi majburiy obuna talabi yo'q.\n\n"
+                        f"🔙 Admin menyuga qaytish uchun '📁 Fayllar' tugmasini bosing.",
+                        reply_markup=admin_keyboard
+                    )
+                else:
+                    await message.answer(
+                        "❌ Kanalni o'chirishda xatolik yuz berdi!\n\n"
+                        "🔄 Qaytadan urinib ko'ring."
+                    )
+            else:
+                await message.answer(
+                    "❌ Noto'g'ri buyruq!\n\n"
+                    "📋 Mavjud buyruqlar:\n"
+                    "• `ochirish` - kanalni o'chirish\n"
+                    "• `bekor` - bekor qilish\n\n"
+                    "🔄 Qaytadan urinib ko'ring."
+                )
+    
+    except Exception as e:
+        logger.error(f"Majburiy obuna boshqarishda xatolik: {e}")
+        await message.answer(
+            "❌ Xatolik yuz berdi!\n"
+            "🔄 Qaytadan urinib ko'ring.\n\n"
+            "👨‍💻 Admin @shohjahon_o5"
+        )
+
 # =================================================================
 # ASOSIY FUNKSIYA
 # =================================================================
@@ -893,6 +1487,7 @@ async def main():
         os.makedirs(EXCEL_FILES_DIR, exist_ok=True)
         os.makedirs(os.path.dirname(USERS_DB), exist_ok=True)
         os.makedirs(os.path.dirname(STATS_FILE), exist_ok=True)
+        os.makedirs(os.path.dirname(CHANNELS_DB), exist_ok=True)
         
         # Excel fayllarini yuklash
         excel_handler.load_existing_files()
@@ -914,3 +1509,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
