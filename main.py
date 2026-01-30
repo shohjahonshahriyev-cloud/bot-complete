@@ -16,7 +16,7 @@ from aiogram.enums import ParseMode
 # =================================================================
 
 # Bot tokeni (BotFather'dan olingan)
-BOT_TOKEN = "8548676063:AAHB15B8j92JKvQWGtzgSXPKTMagFKTAbrk"  # Bu yerga o'zingizning bot tokeningizni kiriting
+BOT_TOKEN = "8170999983:AAHey80CJJAxo2nGFZguloHdcQVtCdje36g"  # Bu yerga o'zingizning bot tokeningizni kiriting
 
 # Admin ID (o'zingizning Telegram ID'ingiz)
 ADMIN_ID = 422057508  # Bu yerga o'zingizning Telegram ID'ingizni kiriting
@@ -284,8 +284,14 @@ class ChannelManager:
         if len(self.channels) >= 1:
             return False
         
+        # Kanal ID dan username ni ajratib olish
+        username = channel_id
+        if not username.startswith('@'):
+            username = f"@{username}"
+        
         channel_info = {
             'id': channel_id,
+            'username': username,  # username ni qo'shish
             'name': channel_name or channel_id,
             'added_date': datetime.now().isoformat()
         }
@@ -311,24 +317,38 @@ class ChannelManager:
     
     async def check_subscription(self, user_id: int, bot: Bot) -> bool:
         """Foydalanuvchining barcha kanallarga obuna bo'lganini tekshirish"""
+        print(f"DEBUG: check_subscription chaqirildi, user_id: {user_id}")
+        print(f"DEBUG: Kanallar ro'yxati: {self.channels}")
+        
         if not self.channels:
+            print("DEBUG: Kanallar yo'q, True qaytaramiz")
             return True
         
         for channel in self.channels:
             try:
                 # Kanal username ni to'g'ri formatga keltirish
                 channel_username = channel['username']
+                print(f"DEBUG: Tekshirilayotgan kanal: {channel_username}")
+                
                 if not channel_username.startswith('@'):
                     channel_username = f"@{channel_username}"  # @ belgisini qo'shish
+                    print(f"DEBUG: Qo'shilgan @: {channel_username}")
                 
+                print(f"DEBUG: {channel_username} kanalida {user_id} obunasini tekshirish")
                 member = await bot.get_chat_member(channel_username, user_id)
+                print(f"DEBUG: User status: {member.status}")
+                
                 if member.status not in ['member', 'administrator', 'creator']:
+                    print(f"DEBUG: User {user_id} obuna bo'lmagan, status: {member.status}")
                     return False
+                else:
+                    print(f"DEBUG: User {user_id} obuna bo'lgan")
             except Exception as e:
                 # Agar kanal topilmasa yoki bot kanalda admin bo'lmasa, bu kanalni o'tkazib yuborish
                 print(f"DEBUG: Kanal tekshiruvi xatoligi: {e}")
                 continue
         
+        print(f"DEBUG: Barcha kanallar uchun obuna tasdiqlandi")
         return True
 
 # =================================================================
@@ -848,6 +868,40 @@ async def handle_message(message: Message):
         
         # Foydalanuvchi faoliyatini yangilash
         db.update_user_activity(user_id)
+        
+        # Avval obunani tekshirish (faqat admin bo'lmaganlar uchun)
+        if not TelegramBot.is_admin(user_id):
+            is_subscribed = await channel_manager.check_subscription(user_id, message.bot)
+            
+            if not is_subscribed:
+                # Kanal ma'lumotlarini olish
+                channels = channel_manager.get_channels()
+                channel = channels[0] if channels else None
+                
+                # Obuna tugmasi
+                if channel:
+                    subscription_keyboard = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="📢 Kanalga o'tish", url=f"https://t.me/{channel['username'].lstrip('@')}")],
+                            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                        ]
+                    )
+                else:
+                    subscription_keyboard = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
+                        ]
+                    )
+                
+                await message.answer(
+                    "🔐 **Majburiy obuna talab qilinadi!**\n\n"
+                    "📢 Botdan to'liq foydalanish uchun kanalga obuna bo'lishingiz kerak:\n\n"
+                    "👉 **Obuna bo'lgach, pastdagi '✅ Tasdiqlash' tugmasini bosing!**\n\n"
+                    "⚠️ Obuna bo'lmasangiz, bot ishlamaydi!",
+                    reply_markup=subscription_keyboard,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
         
         # Komandalarni tekshirish (agar ular Command handlerlar tomonidan qabul qilinmagan bo'lsa)
         if message_text.startswith('/'):
