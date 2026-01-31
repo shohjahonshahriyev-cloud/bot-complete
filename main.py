@@ -15,15 +15,13 @@ from aiogram.client.session.aiohttp import AiohttpSession
 import aiofiles
 from collections import defaultdict
 import time
-from PIL import Image, ImageDraw, ImageFont
 
 # =================================================================
 # KONFIGURATSIYA
 # =================================================================
 
 # Bot tokeni (BotFather'dan olingan)
-BOT_TOKEN = "8548676063:AAHB15B8j92JKvQWGtzgSXPKTMagFKTAbrk"  # Bu yerga o'zingizning bot tokeningizni kiriting
-
+BOT_TOKEN = "8170999983:AAHey80CJJAxo2nGFZguloHdcQVtCdje36g"  # Bu yerga o'zingizning bot tokeningizni kiriting
 # Admin ID (o'zingizning Telegram ID'ingiz)
 ADMIN_ID = 422057508  # Bu yerga o'zingizning Telegram ID'ingizni kiriting
 
@@ -137,115 +135,6 @@ class ExcelHandler:
             print(f"✅ {filename} fayli keshlandi")
         except Exception as e:
             print(f"❌ {filename} faylini keshlashda xatolik: {e}")
-    
-    def create_image_from_dataframe(self, df: pd.DataFrame, user_id: int) -> str:
-        """Pillow yordamida DataFrame'dan optimallashtirilgan rasm yaratadi"""
-        try:
-            # Vaqtinchalik rasm papkasini yaratish
-            temp_dir = "data/temp_images"
-            os.makedirs(temp_dir, exist_ok=True)
-            
-            # Optimal rasm o'lchamlari (Telegram uchun)
-            max_width = 1280  # Telegram maksimal kengligi
-            cell_width = 180
-            cell_height = 60
-            padding = 20
-            
-            # Ustunlar soniga qarab kenglikni hisoblash
-            total_width = min(max_width, len(df.columns) * cell_width + padding * 2)
-            total_height = (len(df) + 2) * cell_height + padding * 3
-            
-            # Rasm yaratish
-            img = Image.new('RGB', (total_width, total_height), color='white')
-            draw = ImageDraw.Draw(img)
-            
-            # Fontlar
-            try:
-                title_font = ImageFont.truetype("arial.ttf", 18)
-                header_font = ImageFont.truetype("arialbd.ttf", 14)  # Bold
-                cell_font = ImageFont.truetype("arial.ttf", 12)
-            except:
-                try:
-                    # Linux fontlari
-                    title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
-                    header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
-                    cell_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-                except:
-                    # Default font
-                    title_font = ImageFont.load_default()
-                    header_font = ImageFont.load_default()
-                    cell_font = ImageFont.load_default()
-            
-            # Sarlavha
-            title_text = f"🔍 ID: {user_id} natijalari ({len(df)} ta)"
-            draw.text((padding, padding), title_text, fill='black', font=title_font)
-            
-            # Jadval boshlanishi
-            start_x = padding
-            start_y = padding * 2 + 20
-            
-            # Ustunlar kengligini hisoblash
-            available_width = total_width - padding * 2
-            col_width = available_width // len(df.columns)
-            
-            # Sarlavha qatori (yashil)
-            y_pos = start_y
-            for i, col in enumerate(df.columns):
-                x_pos = start_x + i * col_width
-                # Yashil fon
-                draw.rectangle([x_pos, y_pos, x_pos + col_width, y_pos + cell_height], 
-                             fill='#4CAF50', outline='black', width=1)
-                # Matn (markazlashtirilgan)
-                text = str(col)
-                if len(text) > 12:
-                    text = text[:12] + '...'
-                bbox = draw.textbbox((0, 0), text, font=header_font)
-                text_width = bbox[2] - bbox[0]
-                text_x = x_pos + (col_width - text_width) // 2
-                draw.text((text_x, y_pos + 15), text, fill='white', font=header_font)
-            
-            # Ma'lumot qatorlari
-            for row_idx, (_, row) in enumerate(df.iterrows()):
-                y_pos = start_y + cell_height * (row_idx + 1)
-                
-                # Qator rangi
-                if row_idx % 2 == 0:
-                    fill_color = '#f8f9fa'
-                else:
-                    fill_color = 'white'
-                
-                for col_idx, (col_name, value) in enumerate(row.items()):
-                    x_pos = start_x + col_idx * col_width
-                    # Katakka fon
-                    draw.rectangle([x_pos, y_pos, x_pos + col_width, y_pos + cell_height], 
-                                 fill=fill_color, outline='black', width=1)
-                    # Matn
-                    text = str(value) if pd.notna(value) else ''
-                    if len(text) > 15:
-                        text = text[:15] + '...'
-                    draw.text((x_pos + 10, y_pos + 20), text, fill='black', font=cell_font)
-            
-            # Rasmni saqlash (optimallashtirilgan)
-            image_path = os.path.join(temp_dir, f"results_{user_id}_{int(time.time())}.jpg")
-            img.save(image_path, 'JPEG', quality=85, optimize=True)
-            
-            # Fayl hajmini tekshirish
-            file_size = os.path.getsize(image_path)
-            print(f"✅ Rasm yaratildi: {image_path} ({file_size} bytes)")
-            
-            # Agar fayl juda katta bo'lsa, sifatni pasaytiramiz
-            if file_size > 10 * 1024 * 1024:  # 10MB
-                img.save(image_path, 'JPEG', quality=60, optimize=True)
-                file_size = os.path.getsize(image_path)
-                print(f"🔄 Rasm qayta saqlandi: {file_size} bytes")
-            
-            return image_path
-            
-        except Exception as e:
-            print(f"❌ Rasm yaratishda xatolik: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
     
     def add_excel_file(self, file_path: str) -> bool:
         """Yangi Excel fayl qo'shish"""
@@ -631,6 +520,83 @@ class TelegramBot:
 # HANDLER FUNKSIYALARI
 # =================================================================
 
+async def send_text_format(message: Message, df_results: pd.DataFrame):
+    """Natijalarni matn formatida yuborish"""
+    try:
+        if df_results.empty:
+            return
+        
+        # Foydalanuvchi ismini olish
+        user_name = message.from_user.first_name or message.from_user.username or "Foydalanuvchi"
+        
+        # Matn yaratish
+        text = f"🔢 TOPILGAN NAZORATLAR SONI: {len(df_results)} TA\n\n"
+        
+        # Birinchi talaba ma'lumotlarini olish
+        first_student = df_results.iloc[0]
+        student_name = f"{first_student.get('Familiya', '')} {first_student.get('Ism', '')}".strip()
+        student_id = first_student.get('ID', '')
+        
+        if student_name:
+            text += f"👤 TALABA: {student_name}\n"
+        if student_id:
+            text += f"🆔 ID: {student_id}\n"
+        
+        text += "\n" + "="*40 + "\n"
+        
+        # Filtrlash uchun kerakli ustunlar ro'yxati (haqiqiy Excel ustun nomlari)
+        allowed_columns = [
+            'Nazorat kuin', 'Nazorat boshlanish vaqti', 'Fan nomi', 
+            'Nazorat xonasi', 'Talaba F.I.', 'Stul raqami',
+            # Qo'shimcha variantlar
+            'Kuni', 'boshlanish vaqti', 'Fan', 'Xona', 'F.I', 'Ism Familiya'
+        ]
+        
+        # Har bir nazorat uchun alohida xabar yuborish
+        for i, (_, row) in enumerate(df_results.iterrows(), 1):
+            # Har bir nazorat uchun alohida matn yaratish
+            exam_text = f"📅 {i}-NAZORAT:\n\n"
+            
+            # Talaba ma'lumotlari (faqat birinchi nazoratda)
+            if i == 1:
+                student_name = f"{row.get('Familiya', '')} {row.get('Ism', '')}".strip()
+                student_id = row.get('ID', '')
+                
+                if student_name:
+                    exam_text += f"👤 TALABA: {student_name}\n"
+                if student_id:
+                    exam_text += f"🆔 ID: {student_id}\n"
+                
+                exam_text += "\n" + "="*30 + "\n"
+            
+            # Moslashuvchan filtrlash - qisman moslik
+            for column in df_results.columns:
+                column_lower = str(column).lower()
+                should_show = False
+                
+                # Har bir ruxsat etilgan ustun uchun tekshirish
+                for allowed in allowed_columns:
+                    allowed_lower = str(allowed).lower()
+                    if allowed_lower in column_lower or column_lower in allowed_lower:
+                        should_show = True
+                        break
+                
+                if should_show:
+                    value = row.get(column, '')
+                    if pd.notna(value) and str(value).strip() and str(value) != 'Noma\'lum':
+                        exam_text += f"{column}: {value}\n"
+            
+            exam_text += "\n" + "-"*25 + "\n"
+            exam_text += f"📊 Jami: {len(df_results)} ta nazoratdan {i}-si"
+            
+            # Har bir nazoratni alohida yuborish
+            await message.answer(exam_text)
+        
+    except Exception as e:
+        logger.error(f"Matn formatida yuborishda xatolik: {e}")
+        await message.answer("❌ Matn formatida yuborishda xatolik yuz berdi!")
+# =================================================================
+
 @dp.message(Command("start"))
 async def start_command(message: Message):
     """Botni ishga tushurish komandasi"""
@@ -1005,8 +971,8 @@ async def handle_message(message: Message):
                     subscription_keyboard = InlineKeyboardMarkup(
                         inline_keyboard=[
                             [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_subscription")]
-                        ]
-                    )
+                    ]
+                )
                 
                 await message.answer(
                     "🔐 **Majburiy obuna talab qilinadi!**\n\n"
@@ -1274,62 +1240,8 @@ async def search_by_id(message: Message, user_id: str):
             # Natijalarni DataFrame ga aylantirish
             df_results = pd.DataFrame(result)
             
-            # Keraksiz ustunlarni olib tashlash
-            excluded_columns = ['fan_kodi', 'group_code', 'curriculum_language', 'exam', 'source_file', 'sirtqi', 'date', 'vaqti']
-            df_filtered = df_results.drop(columns=[col for col in excluded_columns if col in df_results.columns])
-            
-            # Rasm yaratish
-            image_path = excel_handler.create_image_from_dataframe(df_filtered, message.from_user.id)
-            
-            if image_path and os.path.exists(image_path):
-                # Rasm hajmini tekshirish
-                file_size = os.path.getsize(image_path)
-                print(f"DEBUG: Rasm fayli hajmi: {file_size} bytes")
-                
-                # Rasmni yuborish
-                try:
-                    from aiogram.types import FSInputFile
-                    photo = FSInputFile(image_path)
-                    
-                    await message.answer_photo(
-                        photo,
-                        caption=f"🔍 **ID: {user_id} bo'yicha topilgan ma'lumotlar**\n\n"
-                               f"📊 Jami {len(result)} ta natija topildi\n"
-                               f"🤖 SAMDAQU qidiruv boti",
-                        parse_mode=ParseMode.MARKDOWN
-                    )
-                    
-                    # Vaqtinchalik rasmni o'chirish
-                    try:
-                        os.remove(image_path)
-                        print(f"🗑️ Vaqtinchalik rasm o'chirildi: {image_path}")
-                    except:
-                        pass
-                        
-                except Exception as e:
-                    print(f"❌ Rasm yuborishda xatolik: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    
-                    # Xatolik tafsilotlari
-                    if "file too large" in str(e).lower():
-                        error_msg = "❌ Rasm hajmi juda katta! Matn ko'rinishida yuborilmoqda..."
-                    elif "wrong file type" in str(e).lower():
-                        error_msg = "❌ Rasm formati noto'g'ri! Matn ko'rinishida yuborilmoqda..."
-                    else:
-                        error_msg = f"❌ Rasm yuborib bo'lmadi: {str(e)[:100]}"
-                    
-                    # Agar rasm yuborib bo'lmasa, matn sifatida yuborish
-                    await message.answer(
-                        f"{error_msg}\n\n"
-                        f"🔍 ID: {user_id} bo'yicha {len(result)} ta natija topildi."
-                    )
-            else:
-                # Agar rasm yaratib bo'lmasa, xabar berish
-                await message.answer(
-                    "❌ Rasm yaratishda xatolik yuz berdi!\n"
-                    "🔄 Qaytadan urinib ko'ring."
-                )
+            # Faqat matn formatida yuborish
+            await send_text_format(message, df_results)
         else:
             await message.answer(
                 f"❌ ID: {user_id} bo'yicha ma'lumot topilmadi.\n\n"
@@ -1659,78 +1571,35 @@ async def handle_subscription_management(message: Message):
 # =================================================================
 
 async def main():
-    """Botni ishga tushurish - Railway uchun optimallashtirilgan"""
+    """Botni ishga tushurish"""
     try:
-        # Logging sozlamalari
-        logging.basicConfig(
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            level=logging.INFO
-        )
-        logger = logging.getLogger(__name__)
-        
         print("🤖 Excel qidiruv boti ishga tushmoqda...")
         print(f"👨‍💻 Admin ID: {ADMIN_ID}")
         print(f"📁 Excel fayllar papkasi: {EXCEL_FILES_DIR}")
-        
-        # Bot yaratish
-        bot = Bot(
-            token=BOT_TOKEN,
-            parse_mode=ParseMode.HTML
-        )
-        
-        # Dispatcher yaratish
-        dp = Dispatcher()
-        
-        # Global obyektlarni yaratish
-        global excel_handler, channel_manager, db
         
         # Papkalarni yaratish
         os.makedirs(EXCEL_FILES_DIR, exist_ok=True)
         os.makedirs(os.path.dirname(USERS_DB), exist_ok=True)
         os.makedirs(os.path.dirname(STATS_FILE), exist_ok=True)
         os.makedirs(os.path.dirname(CHANNELS_DB), exist_ok=True)
-        os.makedirs("data/temp_images", exist_ok=True)
-        
-        # Obyektlarni yaratish
-        excel_handler = ExcelHandler()
-        channel_manager = ChannelManager()
-        db = Database()
         
         # Excel fayllarini yuklash
         excel_handler.load_existing_files()
         print(f"📊 Yuklangan Excel fayllar: {len(excel_handler.get_file_list())} ta")
         
-        # Handlerlarni ro'yxatga olish
-        from aiogram import Router
-        router = Router()
-        
-        # Handlerlarni qo'shish
-        router.message.register(start_command, Command("start"))
-        router.callback_query.register(start_search_callback, F.data == "start_search")
-        router.callback_query.register(check_subscription_callback, F.data == "check_subscription")
-        router.message.register(help_command, Command("help"))
-        router.message.register(handle_document, F.document)
-        router.message.register(delete_file_command, Command("del"))
-        router.message.register(handle_message, F.text & ~F.command)
-        
-        dp.include_router(router)
-        
         # Botni ishga tushurish
         print("🚀 Bot polling boshlandi...")
         await dp.start_polling(bot)
         
+    except KeyboardInterrupt:
+        print("⏹️ Bot to'xtatildi")
     except Exception as e:
-        print(f"❌ Botni ishga tushirishda xatolik: {e}")
-        import traceback
-        traceback.print_exc()
-        # Railway da bot qayta ishga tushishi uchun
-        await asyncio.sleep(5)
-        await main()
+        logger.error(f"Botni ishga tushurishda xatolik: {e}")
+        print(f"❌ Xatolik: {e}")
     finally:
         # Sessionni yopish
-        if 'bot' in locals():
-            await bot.session.close()
-            print("🔒 Bot session yopildi")
+        await bot.session.close()
+        print("🔒 Bot session yopildi")
 
 if __name__ == "__main__":
     asyncio.run(main())
