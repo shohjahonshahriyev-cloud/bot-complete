@@ -1,7 +1,7 @@
-aiogram==3.13.1      # Telegram bot
-pandas==2.0.3        # Excel ishlash  
-openpyxl==3.1.5      # Excel fayllar
-python-dotenv==1.0.1 # .env fayllar
-numpy==1.23.5        # Matematika
-aiofiles==23.2.1     # Asinxron fayllar
-Pillow==10.0.0       # Rasm yaratish (asosiysi!)
+aiogram==3.13.1     
+pandas==2.0.3       
+openpyxl==3.1.5    
+python-dotenv==1.0.1 
+numpy==1.23.5       
+aiofiles==23.2.1     
+Pillow==10.0.0      
