@@ -5,7 +5,7 @@
     "pythonVersion": "3.11.7"
   },
   "deploy": {
-    "startCommand": "python bot_complete_nusxa.py",
+    "startCommand": "python main.py",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
