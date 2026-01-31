@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -22,7 +22,8 @@ from PIL import Image, ImageDraw, ImageFont
 # =================================================================
 
 # Bot tokeni (BotFather'dan olingan)
-BOT_TOKEN = "8548676063:AAHB15B8j92JKvQWGtzgSXPKTMagFKTAbrk"  # Bu yerga o'zingizning bot tokeningizni kiriting
+BOT_TOKEN = "8170999983:AAHey80CJJAxo2nGFZguloHdcQVtCdje36g"  # Bu yerga o'zingizning bot tokeningizni kiriting
+
 # Admin ID (o'zingizning Telegram ID'ingiz)
 ADMIN_ID = 422057508  # Bu yerga o'zingizning Telegram ID'ingizni kiriting
 
@@ -1658,35 +1659,81 @@ async def handle_subscription_management(message: Message):
 # =================================================================
 
 async def main():
-    """Botni ishga tushurish"""
+    """Botni ishga tushurish - Railway uchun optimallashtirilgan"""
     try:
+        # Logging sozlamalari
+        logging.basicConfig(
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            level=logging.INFO
+        )
+        logger = logging.getLogger(__name__)
+        
         print("🤖 Excel qidiruv boti ishga tushmoqda...")
         print(f"👨‍💻 Admin ID: {ADMIN_ID}")
         print(f"📁 Excel fayllar papkasi: {EXCEL_FILES_DIR}")
+        
+        # Bot yaratish
+        bot = Bot(
+            token=BOT_TOKEN,
+            default=DefaultBotProperties(
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
+        )
+        
+        # Dispatcher yaratish
+        dp = Dispatcher()
+        
+        # Global obyektlarni yaratish
+        global excel_handler, channel_manager, db
         
         # Papkalarni yaratish
         os.makedirs(EXCEL_FILES_DIR, exist_ok=True)
         os.makedirs(os.path.dirname(USERS_DB), exist_ok=True)
         os.makedirs(os.path.dirname(STATS_FILE), exist_ok=True)
         os.makedirs(os.path.dirname(CHANNELS_DB), exist_ok=True)
+        os.makedirs("data/temp_images", exist_ok=True)
+        
+        # Obyektlarni yaratish
+        excel_handler = ExcelHandler()
+        channel_manager = ChannelManager()
+        db = Database()
         
         # Excel fayllarini yuklash
-        excel_handler.load_existing_files()
+        await excel_handler.load_existing_files_async()
         print(f"📊 Yuklangan Excel fayllar: {len(excel_handler.get_file_list())} ta")
+        
+        # Handlerlarni ro'yxatga olish
+        from aiogram import Router
+        router = Router()
+        
+        # Handlerlarni qo'shish
+        router.message.register(start_command, Command("start"))
+        router.callback_query.register(start_search_callback, F.data == "start_search")
+        router.callback_query.register(check_subscription_callback, F.data == "check_subscription")
+        router.message.register(help_command, Command("help"))
+        router.message.register(handle_document, F.document)
+        router.message.register(delete_file_command, Command("del"))
+        router.message.register(handle_message, F.text & ~F.command)
+        
+        dp.include_router(router)
         
         # Botni ishga tushurish
         print("🚀 Bot polling boshlandi...")
         await dp.start_polling(bot)
         
-    except KeyboardInterrupt:
-        print("⏹️ Bot to'xtatildi")
     except Exception as e:
-        logger.error(f"Botni ishga tushurishda xatolik: {e}")
-        print(f"❌ Xatolik: {e}")
+        print(f"❌ Botni ishga tushirishda xatolik: {e}")
+        import traceback
+        traceback.print_exc()
+        # Railway da bot qayta ishga tushishi uchun
+        await asyncio.sleep(5)
+        await main()
     finally:
         # Sessionni yopish
-        await bot.session.close()
-        print("🔒 Bot session yopildi")
+        if 'bot' in locals():
+            await bot.session.close()
+            print("🔒 Bot session yopildi")
 
 if __name__ == "__main__":
     asyncio.run(main())
