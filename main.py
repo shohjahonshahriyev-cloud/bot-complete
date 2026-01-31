@@ -10,6 +10,17 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramAPIError
+from aiogram.client.session.aiohttp import AiohttpSession
+import aiofiles
+from collections import defaultdict
+import time
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+# Matplotlib uchun font sozlamalari
+plt.rcParams['font.family'] = 'DejaVu Sans'
+plt.rcParams['axes.unicode_minus'] = False
 
 # =================================================================
 # KONFIGURATSIYA
@@ -131,6 +142,55 @@ class ExcelHandler:
             print(f"✅ {filename} fayli keshlandi")
         except Exception as e:
             print(f"❌ {filename} faylini keshlashda xatolik: {e}")
+    
+    def create_image_from_dataframe(self, df: pd.DataFrame, user_id: int) -> str:
+        """Pandas DataFrame'dan rasm yaratadi va faylga saqlaydi"""
+        try:
+            # Vaqtinchalik rasm papkasini yaratish
+            temp_dir = "data/temp_images"
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # Rasm hajmini hisoblash
+            fig_height = max(4, len(df) * 0.5 + 2)
+            fig_width = max(10, len(df.columns) * 2)
+            
+            # Rasm yaratish
+            fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+            ax.axis('tight')
+            ax.axis('off')
+            
+            # Jadval yaratish
+            table = ax.table(cellText=df.values, colLabels=df.columns, 
+                          cellLoc='center', loc='center')
+            
+            # Jadval stilini sozlash
+            table.auto_set_font_size(False)
+            table.set_fontsize(10)
+            table.scale(1.2, 1.5)
+            
+            # Sarlavha rangi
+            for i in range(len(df.columns)):
+                table[(0, i)].set_facecolor('#4CAF50')
+                table[(0, i)].set_text_props(weight='bold', color='white')
+            
+            # Qatorlarni navbat bilan ranglash
+            for i in range(1, len(df) + 1):
+                if i % 2 == 0:
+                    for j in range(len(df.columns)):
+                        table[(i, j)].set_facecolor('#f0f0f0')
+            
+            # Rasmni saqlash
+            image_path = os.path.join(temp_dir, f"results_{user_id}_{int(time.time())}.png")
+            plt.savefig(image_path, bbox_inches='tight', dpi=150, 
+                       facecolor='white', edgecolor='none')
+            plt.close(fig)
+            
+            print(f"✅ Rasm yaratildi: {image_path}")
+            return image_path
+            
+        except Exception as e:
+            print(f"❌ Rasm yaratishda xatolik: {e}")
+            return None
     
     def add_excel_file(self, file_path: str) -> bool:
         """Yangi Excel fayl qo'shish"""
@@ -1156,52 +1216,50 @@ async def search_by_id(message: Message, user_id: str):
         db.increment_search_count(message.from_user.id)
         
         if result:
-            # Endi result - bu list, har bir element uchun alohida xabar yuboramiz
-            for i, single_result in enumerate(result, 1):
-                # Hafta kunini va sanasini Excel fayldan olish
-                week_day = str(single_result.get('Nazorat kuni', 'Noma\'lum'))
-                date_str = single_result.get('Nazorat sanasi', 'Noma\'lum')
-                
-                # Debug uchun chop etish
-                print(f"DEBUG: Sana asl qiymati: {date_str} (tip: {type(date_str)})")
-                
-                # Sanani formatlash
+            # Natijalarni DataFrame ga aylantirish
+            df_results = pd.DataFrame(result)
+            
+            # Keraksiz ustunlarni olib tashlash
+            excluded_columns = ['fan_kodi', 'group_code', 'curriculum_language', 'exam', 'source_file', 'sirtqi', 'date', 'vaqti']
+            df_filtered = df_results.drop(columns=[col for col in excluded_columns if col in df_results.columns])
+            
+            # Rasm yaratish
+            image_path = excel_handler.create_image_from_dataframe(df_filtered, message.from_user.id)
+            
+            if image_path and os.path.exists(image_path):
+                # Rasmni yuborish
                 try:
-                    if date_str != 'Noma\'lum' and date_str != '' and pd.notna(date_str):
-                        formatted_date = str(date_str)
-                        print(f"DEBUG: Formatlangan sana: {formatted_date}")
-                    else:
-                        formatted_date = 'Noma\'lum'
-                        print(f"DEBUG: Sana Noma\'lum deb belgilandi")
+                    from aiogram.types import FSInputFile
+                    photo = FSInputFile(image_path)
+                    
+                    await message.answer_photo(
+                        photo,
+                        caption=f"🔍 **ID: {user_id} bo'yicha topilgan ma'lumotlar**\n\n"
+                               f"📊 Jami {len(result)} ta natija topildi\n"
+                               f"🤖 SAMDAQU qidiruv boti",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    
+                    # Vaqtinchalik rasmni o'chirish
+                    try:
+                        os.remove(image_path)
+                        print(f"🗑️ Vaqtinchalik rasm o'chirildi: {image_path}")
+                    except:
+                        pass
+                        
                 except Exception as e:
-                    print(f"Sana formatlash xatoligi: {e}")
-                    formatted_date = str(date_str) if date_str != 'Noma\'lum' else 'Noma\'lum'
-                
-                # Natijani formatlash - ba'zi ustunlarni o'tkazib yuborish
-                response_text = f"📅 {i}-NAZORAT:\n\n"
-                
-                # O'tkazib yuboriladigan ustunlar ro'yxati
-                excluded_columns = ['fan_kodi', 'group_code', 'curriculum_language', 'exam', 'source_file', 'sirtqi', 'date', 'vaqti']
-                
-                for column_name, value in single_result.items():
-                    if column_name.lower() not in excluded_columns and column_name != 'ID':
-                        # Bo'sh bo'lmagan qiymatlarni ko'rsatish
-                        if value and value.strip() and value != 'nan':
-                            # Raqamli qiymatlarni formatlash (40.0 -> 40)
-                            try:
-                                if '.' in value and value.replace('.', '').isdigit():
-                                    formatted_value = value.rstrip('.0')
-                                    if not formatted_value:
-                                        formatted_value = '0'
-                                    response_text += f"📋 {column_name.upper()}: {formatted_value}\n"
-                                else:
-                                    response_text += f"📋 {column_name.upper()}: {value}\n"
-                            except:
-                                response_text += f"📋 {column_name.upper()}: {value}\n"
-                
-                response_text += f"\n🔢 ID: {single_result.get('ID', 'Noma\'lum')}"
-                
-                await message.answer(response_text)
+                    print(f"❌ Rasm yuborishda xatolik: {e}")
+                    # Agar rasm yuborib bo'lmasa, matn sifatida yuborish
+                    await message.answer(
+                        f"❌ Rasm yuborib bo'lmadi. Matn ko'rinishida:\n\n"
+                        f"🔍 ID: {user_id} bo'yicha {len(result)} ta natija topildi."
+                    )
+            else:
+                # Agar rasm yaratib bo'lmasa, xabar berish
+                await message.answer(
+                    "❌ Rasm yaratishda xatolik yuz berdi!\n"
+                    "� Qaytadan urinib ko'ring."
+                )
         else:
             await message.answer(
                 f"❌ ID: {user_id} bo'yicha ma'lumot topilmadi.\n\n"
@@ -1563,4 +1621,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
