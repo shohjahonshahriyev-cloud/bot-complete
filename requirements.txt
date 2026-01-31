@@ -1,7 +1,5 @@
-aiogram==3.4.1       # ✅ Stabil versiya
-pandas==2.0.3        # ✅ Excel ishlash
-openpyxl==3.1.2      # ✅ Excel fayllar
-python-dotenv==1.0.0 # ✅ .env fayllar
-numpy==1.24.3        # ✅ Matematika
-aiofiles==23.2.1     # ✅ aiogram 3.4.1 ga mos
-Pillow==9.5.0        # ✅ Rasm yaratish
+aiogram==3.13.1
+pandas==2.2.3
+aiofiles==23.2.1
+openpyxl==3.1.5
+python-dotenv==1.0.1
