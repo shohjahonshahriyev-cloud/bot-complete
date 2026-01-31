@@ -1697,7 +1697,7 @@ async def main():
         db = Database()
         
         # Excel fayllarini yuklash
-        await excel_handler.load_existing_files_async()
+        excel_handler.load_existing_files()
         print(f"📊 Yuklangan Excel fayllar: {len(excel_handler.get_file_list())} ta")
         
         # Handlerlarni ro'yxatga olish
