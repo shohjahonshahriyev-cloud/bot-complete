@@ -21,7 +21,7 @@ import time
 # =================================================================
 
 # Bot tokeni (BotFather'dan olingan)
-BOT_TOKEN = "8170999983:AAHey80CJJAxo2nGFZguloHdcQVtCdje36g"  # Bu yerga o'zingizning bot tokeningizni kiriting
+BOT_TOKEN = "8548676063:AAE9xbU1QIcP_4ZFgqUez46GNRgf-SSHW0w"  # Bu yerga o'zingizning bot tokeningizni kiriting
 # Admin ID (o'zingizning Telegram ID'ingiz)
 ADMIN_ID = 422057508  # Bu yerga o'zingizning Telegram ID'ingizni kiriting
 
