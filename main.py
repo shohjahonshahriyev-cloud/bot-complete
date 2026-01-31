@@ -15,19 +15,14 @@ from aiogram.client.session.aiohttp import AiohttpSession
 import aiofiles
 from collections import defaultdict
 import time
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-
-# Matplotlib uchun font sozlamalari
-plt.rcParams['font.family'] = 'DejaVu Sans'
-plt.rcParams['axes.unicode_minus'] = False
+from PIL import Image, ImageDraw, ImageFont
 
 # =================================================================
 # KONFIGURATSIYA
 # =================================================================
 
 # Bot tokeni (BotFather'dan olingan)
-BOT_TOKEN = "8548676063:AAHB15B8j92JKvQWGtzgSXPKTMagFKTAbrk"  # Bu yerga o'zingizning bot tokeningizni kiriting
+BOT_TOKEN = "8170999983:AAHey80CJJAxo2nGFZguloHdcQVtCdje36g"  # Bu yerga o'zingizning bot tokeningizni kiriting
 
 # Admin ID (o'zingizning Telegram ID'ingiz)
 ADMIN_ID = 422057508  # Bu yerga o'zingizning Telegram ID'ingizni kiriting
@@ -144,46 +139,81 @@ class ExcelHandler:
             print(f"❌ {filename} faylini keshlashda xatolik: {e}")
     
     def create_image_from_dataframe(self, df: pd.DataFrame, user_id: int) -> str:
-        """Pandas DataFrame'dan rasm yaratadi va faylga saqlaydi"""
+        """Pillow yordamida DataFrame'dan rasm yaratadi"""
         try:
             # Vaqtinchalik rasm papkasini yaratish
             temp_dir = "data/temp_images"
             os.makedirs(temp_dir, exist_ok=True)
             
-            # Rasm hajmini hisoblash
-            fig_height = max(4, len(df) * 0.5 + 2)
-            fig_width = max(10, len(df.columns) * 2)
+            # Rasm o'lchamlari
+            img_width = max(800, len(df.columns) * 150)
+            img_height = max(400, (len(df) + 3) * 60)
             
             # Rasm yaratish
-            fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-            ax.axis('tight')
-            ax.axis('off')
+            img = Image.new('RGB', (img_width, img_height), color='white')
+            draw = ImageDraw.Draw(img)
             
-            # Jadval yaratish
-            table = ax.table(cellText=df.values, colLabels=df.columns, 
-                          cellLoc='center', loc='center')
+            # Fontlar (agar mavjud bo'lmasa, default ishlatiladi)
+            try:
+                title_font = ImageFont.truetype("arial.ttf", 20)
+                header_font = ImageFont.truetype("arial.ttf", 14)
+                cell_font = ImageFont.truetype("arial.ttf", 12)
+            except:
+                title_font = ImageFont.load_default()
+                header_font = ImageFont.load_default()
+                cell_font = ImageFont.load_default()
             
-            # Jadval stilini sozlash
-            table.auto_set_font_size(False)
-            table.set_fontsize(10)
-            table.scale(1.2, 1.5)
+            # Sarlavha
+            title_text = f"🔍 ID: {user_id} natijalari ({len(df)} ta)"
+            draw.text((20, 20), title_text, fill='black', font=title_font)
             
-            # Sarlavha rangi
-            for i in range(len(df.columns)):
-                table[(0, i)].set_facecolor('#4CAF50')
-                table[(0, i)].set_text_props(weight='bold', color='white')
+            # Jadval parametrlari
+            cell_width = 140
+            cell_height = 50
+            start_x = 20
+            start_y = 60
             
-            # Qatorlarni navbat bilan ranglash
-            for i in range(1, len(df) + 1):
-                if i % 2 == 0:
-                    for j in range(len(df.columns)):
-                        table[(i, j)].set_facecolor('#f0f0f0')
+            # Ustunlar kengligini hisoblash
+            col_widths = []
+            for col in df.columns:
+                col_width = max(cell_width, len(str(col)) * 8 + 20)
+                col_widths.append(col_width)
+            
+            # Sarlavha qatori (yashil)
+            x_pos = start_x
+            for i, col in enumerate(df.columns):
+                # Yashil fon
+                draw.rectangle([x_pos, start_y, x_pos + col_widths[i], start_y + cell_height], 
+                             fill='#4CAF50', outline='black')
+                # Matn
+                draw.text((x_pos + 10, start_y + 15), str(col), fill='white', font=header_font)
+                x_pos += col_widths[i]
+            
+            # Ma'lumot qatorlari
+            for row_idx, (_, row) in enumerate(df.iterrows()):
+                y_pos = start_y + cell_height * (row_idx + 1)
+                
+                # Qator rangi (navbat bilan)
+                if row_idx % 2 == 0:
+                    fill_color = '#f8f9fa'
+                else:
+                    fill_color = 'white'
+                
+                x_pos = start_x
+                for col_idx, (col_name, value) in enumerate(row.items()):
+                    # Katakka fon
+                    draw.rectangle([x_pos, y_pos, x_pos + col_widths[col_idx], y_pos + cell_height], 
+                                 fill=fill_color, outline='black')
+                    # Matn
+                    text = str(value) if pd.notna(value) else ''
+                    if len(text) > 15:
+                        text = text[:15] + '...'
+                    draw.text((x_pos + 10, y_pos + 15), text, fill='black', font=cell_font)
+                    x_pos += col_widths[col_idx]
             
             # Rasmni saqlash
             image_path = os.path.join(temp_dir, f"results_{user_id}_{int(time.time())}.png")
-            plt.savefig(image_path, bbox_inches='tight', dpi=150, 
-                       facecolor='white', edgecolor='none')
-            plt.close(fig)
+            img.save(image_path, 'PNG', quality=95)
             
             print(f"✅ Rasm yaratildi: {image_path}")
             return image_path
@@ -1258,7 +1288,7 @@ async def search_by_id(message: Message, user_id: str):
                 # Agar rasm yaratib bo'lmasa, xabar berish
                 await message.answer(
                     "❌ Rasm yaratishda xatolik yuz berdi!\n"
-                    "� Qaytadan urinib ko'ring."
+                    "🔄 Qaytadan urinib ko'ring."
                 )
         else:
             await message.answer(
