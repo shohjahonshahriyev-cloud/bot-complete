@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 # =================================================================
 
 # Bot tokeni (BotFather'dan olingan)
-BOT_TOKEN = "8548676063:AAHB15B8j92JKvQWGtzgSXPKTMagFKTAbrk"  # Bu yerga o'zingizning bot tokeningizni kiriting
+BOT_TOKEN = "8170999983:AAHey80CJJAxo2nGFZguloHdcQVtCdje36g"  # Bu yerga o'zingizning bot tokeningizni kiriting
 
 # Admin ID (o'zingizning Telegram ID'ingiz)
 ADMIN_ID = 422057508  # Bu yerga o'zingizning Telegram ID'ingizni kiriting
@@ -139,87 +139,112 @@ class ExcelHandler:
             print(f"❌ {filename} faylini keshlashda xatolik: {e}")
     
     def create_image_from_dataframe(self, df: pd.DataFrame, user_id: int) -> str:
-        """Pillow yordamida DataFrame'dan rasm yaratadi"""
+        """Pillow yordamida DataFrame'dan optimallashtirilgan rasm yaratadi"""
         try:
             # Vaqtinchalik rasm papkasini yaratish
             temp_dir = "data/temp_images"
             os.makedirs(temp_dir, exist_ok=True)
             
-            # Rasm o'lchamlari
-            img_width = max(800, len(df.columns) * 150)
-            img_height = max(400, (len(df) + 3) * 60)
+            # Optimal rasm o'lchamlari (Telegram uchun)
+            max_width = 1280  # Telegram maksimal kengligi
+            cell_width = 180
+            cell_height = 60
+            padding = 20
+            
+            # Ustunlar soniga qarab kenglikni hisoblash
+            total_width = min(max_width, len(df.columns) * cell_width + padding * 2)
+            total_height = (len(df) + 2) * cell_height + padding * 3
             
             # Rasm yaratish
-            img = Image.new('RGB', (img_width, img_height), color='white')
+            img = Image.new('RGB', (total_width, total_height), color='white')
             draw = ImageDraw.Draw(img)
             
-            # Fontlar (agar mavjud bo'lmasa, default ishlatiladi)
+            # Fontlar
             try:
-                title_font = ImageFont.truetype("arial.ttf", 20)
-                header_font = ImageFont.truetype("arial.ttf", 14)
+                title_font = ImageFont.truetype("arial.ttf", 18)
+                header_font = ImageFont.truetype("arialbd.ttf", 14)  # Bold
                 cell_font = ImageFont.truetype("arial.ttf", 12)
             except:
-                title_font = ImageFont.load_default()
-                header_font = ImageFont.load_default()
-                cell_font = ImageFont.load_default()
+                try:
+                    # Linux fontlari
+                    title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+                    header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+                    cell_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+                except:
+                    # Default font
+                    title_font = ImageFont.load_default()
+                    header_font = ImageFont.load_default()
+                    cell_font = ImageFont.load_default()
             
             # Sarlavha
             title_text = f"🔍 ID: {user_id} natijalari ({len(df)} ta)"
-            draw.text((20, 20), title_text, fill='black', font=title_font)
+            draw.text((padding, padding), title_text, fill='black', font=title_font)
             
-            # Jadval parametrlari
-            cell_width = 140
-            cell_height = 50
-            start_x = 20
-            start_y = 60
+            # Jadval boshlanishi
+            start_x = padding
+            start_y = padding * 2 + 20
             
             # Ustunlar kengligini hisoblash
-            col_widths = []
-            for col in df.columns:
-                col_width = max(cell_width, len(str(col)) * 8 + 20)
-                col_widths.append(col_width)
+            available_width = total_width - padding * 2
+            col_width = available_width // len(df.columns)
             
             # Sarlavha qatori (yashil)
-            x_pos = start_x
+            y_pos = start_y
             for i, col in enumerate(df.columns):
+                x_pos = start_x + i * col_width
                 # Yashil fon
-                draw.rectangle([x_pos, start_y, x_pos + col_widths[i], start_y + cell_height], 
-                             fill='#4CAF50', outline='black')
-                # Matn
-                draw.text((x_pos + 10, start_y + 15), str(col), fill='white', font=header_font)
-                x_pos += col_widths[i]
+                draw.rectangle([x_pos, y_pos, x_pos + col_width, y_pos + cell_height], 
+                             fill='#4CAF50', outline='black', width=1)
+                # Matn (markazlashtirilgan)
+                text = str(col)
+                if len(text) > 12:
+                    text = text[:12] + '...'
+                bbox = draw.textbbox((0, 0), text, font=header_font)
+                text_width = bbox[2] - bbox[0]
+                text_x = x_pos + (col_width - text_width) // 2
+                draw.text((text_x, y_pos + 15), text, fill='white', font=header_font)
             
             # Ma'lumot qatorlari
             for row_idx, (_, row) in enumerate(df.iterrows()):
                 y_pos = start_y + cell_height * (row_idx + 1)
                 
-                # Qator rangi (navbat bilan)
+                # Qator rangi
                 if row_idx % 2 == 0:
                     fill_color = '#f8f9fa'
                 else:
                     fill_color = 'white'
                 
-                x_pos = start_x
                 for col_idx, (col_name, value) in enumerate(row.items()):
+                    x_pos = start_x + col_idx * col_width
                     # Katakka fon
-                    draw.rectangle([x_pos, y_pos, x_pos + col_widths[col_idx], y_pos + cell_height], 
-                                 fill=fill_color, outline='black')
+                    draw.rectangle([x_pos, y_pos, x_pos + col_width, y_pos + cell_height], 
+                                 fill=fill_color, outline='black', width=1)
                     # Matn
                     text = str(value) if pd.notna(value) else ''
                     if len(text) > 15:
                         text = text[:15] + '...'
-                    draw.text((x_pos + 10, y_pos + 15), text, fill='black', font=cell_font)
-                    x_pos += col_widths[col_idx]
+                    draw.text((x_pos + 10, y_pos + 20), text, fill='black', font=cell_font)
             
-            # Rasmni saqlash
-            image_path = os.path.join(temp_dir, f"results_{user_id}_{int(time.time())}.png")
-            img.save(image_path, 'PNG', quality=95)
+            # Rasmni saqlash (optimallashtirilgan)
+            image_path = os.path.join(temp_dir, f"results_{user_id}_{int(time.time())}.jpg")
+            img.save(image_path, 'JPEG', quality=85, optimize=True)
             
-            print(f"✅ Rasm yaratildi: {image_path}")
+            # Fayl hajmini tekshirish
+            file_size = os.path.getsize(image_path)
+            print(f"✅ Rasm yaratildi: {image_path} ({file_size} bytes)")
+            
+            # Agar fayl juda katta bo'lsa, sifatni pasaytiramiz
+            if file_size > 10 * 1024 * 1024:  # 10MB
+                img.save(image_path, 'JPEG', quality=60, optimize=True)
+                file_size = os.path.getsize(image_path)
+                print(f"🔄 Rasm qayta saqlandi: {file_size} bytes")
+            
             return image_path
             
         except Exception as e:
             print(f"❌ Rasm yaratishda xatolik: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def add_excel_file(self, file_path: str) -> bool:
@@ -1257,6 +1282,10 @@ async def search_by_id(message: Message, user_id: str):
             image_path = excel_handler.create_image_from_dataframe(df_filtered, message.from_user.id)
             
             if image_path and os.path.exists(image_path):
+                # Rasm hajmini tekshirish
+                file_size = os.path.getsize(image_path)
+                print(f"DEBUG: Rasm fayli hajmi: {file_size} bytes")
+                
                 # Rasmni yuborish
                 try:
                     from aiogram.types import FSInputFile
@@ -1279,9 +1308,20 @@ async def search_by_id(message: Message, user_id: str):
                         
                 except Exception as e:
                     print(f"❌ Rasm yuborishda xatolik: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # Xatolik tafsilotlari
+                    if "file too large" in str(e).lower():
+                        error_msg = "❌ Rasm hajmi juda katta! Matn ko'rinishida yuborilmoqda..."
+                    elif "wrong file type" in str(e).lower():
+                        error_msg = "❌ Rasm formati noto'g'ri! Matn ko'rinishida yuborilmoqda..."
+                    else:
+                        error_msg = f"❌ Rasm yuborib bo'lmadi: {str(e)[:100]}"
+                    
                     # Agar rasm yuborib bo'lmasa, matn sifatida yuborish
                     await message.answer(
-                        f"❌ Rasm yuborib bo'lmadi. Matn ko'rinishida:\n\n"
+                        f"{error_msg}\n\n"
                         f"🔍 ID: {user_id} bo'yicha {len(result)} ta natija topildi."
                     )
             else:
