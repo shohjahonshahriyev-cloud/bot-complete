@@ -1,7 +1,7 @@
-aiogram==3.13.1     
-pandas==2.0.3       
-openpyxl==3.1.5    
-python-dotenv==1.0.1 
-numpy==1.23.5       
-aiofiles==23.2.1     
-Pillow==10.0.0      
+aiogram==3.4.1       # ✅ Python 3.11.7 da stabil
+pandas==2.0.3        # ✅ Excel ishlash
+openpyxl==3.1.2      # ✅ Excel fayllar
+python-dotenv==1.0.0 # ✅ .env fayllar
+numpy==1.24.3        # ✅ Matematika
+aiofiles==23.2.0     # ✅ Asinxron fayllar
+Pillow==9.5.0        # ✅ Rasm yaratish
