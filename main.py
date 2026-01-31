@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, DefaultBotProperties
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -1675,10 +1675,7 @@ async def main():
         # Bot yaratish
         bot = Bot(
             token=BOT_TOKEN,
-            default=DefaultBotProperties(
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True
-            )
+            parse_mode=ParseMode.HTML
         )
         
         # Dispatcher yaratish
